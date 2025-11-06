@@ -65,7 +65,7 @@ func main() {
 	// Static Files (CSS/JS) z.B. in web/static/...
 	http.Handle("/static/",
 		http.StripPrefix("/static/",
-			http.FileServer(http.Dir("web/static")),
+			http.FileServer(http.Dir("internals/web/static")),
 		),
 	)
 

@@ -1,1 +1,17 @@
-null
+[
+  {
+    "id": 1,
+    "title": "Go installieren",
+    "status": "todo"
+  },
+  {
+    "id": 2,
+    "title": "Kanban Board bauen",
+    "status": "doing"
+  },
+  {
+    "id": 3,
+    "title": "Kaffee holen",
+    "status": "done"
+  }
+]

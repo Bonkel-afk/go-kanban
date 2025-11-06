@@ -2,7 +2,6 @@ package web
 
 import (
 	"html/template"
-	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -11,142 +10,100 @@ import (
 	"com.bonkelbansi/go-kanban/storage"
 )
 
-type BoardData struct {
-	Todo  []models.Task
-	Doing []models.Task
-	Done  []models.Task
-}
-
 var (
-	tmpl   = template.Must(template.ParseFiles("internal/web/templates/board.html"))
-	tasks  []models.Task
-	mu     sync.Mutex
-	nextID = 1
+	mu    sync.Mutex
+	Tasks []models.Task
+	Tmpl  = template.Must(template.ParseFiles("internals/web/templates/board.html"))
 )
-
-func next() int {
-	id := nextID
-	nextID++
-	return id
-}
-
-func Load() {
-	mu.Lock()
-	defer mu.Unlock()
-
-	loaded, err := storage.Store.LoadTasks()
-	if err != nil {
-		log.Println("Fehler beim Laden:", err)
-	}
-	tasks = loaded
-	for _, t := range tasks {
-		if t.ID >= nextID {
-			nextID = t.ID + 1
-		}
-	}
-	if len(tasks) == 0 {
-		tasks = []models.Task{
-			{ID: next(), Title: "Go installieren", Status: models.StatusTodo},
-			{ID: next(), Title: "Kanban Board bauen", Status: models.StatusDoing},
-			{ID: next(), Title: "Kaffee holen", Status: models.StatusDone},
-		}
-		_ = storage.Store.SaveTasks(tasks)
-	}
-}
 
 func BoardHandler(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
-	data := BoardData{}
-	for _, t := range tasks {
+	var todo, doing, done []models.Task
+	for _, t := range Tasks {
 		switch t.Status {
 		case models.StatusTodo:
-			data.Todo = append(data.Todo, t)
+			todo = append(todo, t)
 		case models.StatusDoing:
-			data.Doing = append(data.Doing, t)
+			doing = append(doing, t)
 		case models.StatusDone:
-			data.Done = append(data.Done, t)
+			done = append(done, t)
 		}
 	}
+	data := struct {
+		Todo  []models.Task
+		Doing []models.Task
+		Done  []models.Task
+	}{todo, doing, done}
 	mu.Unlock()
 
-	if err := tmpl.Execute(w, data); err != nil {
-		http.Error(w, err.Error(), 500)
+	if err := Tmpl.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func AddHandler(w http.ResponseWriter, r *http.Request) {
+func AddTaskHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Redirect(w, r, "/", 303)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", 400)
+		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
 
 	title := r.FormValue("title")
 	if title == "" {
-		http.Redirect(w, r, "/", 303)
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
 
 	mu.Lock()
-	tasks = append(tasks, models.Task{ID: next(), Title: title, Status: models.StatusTodo})
-	_ = storage.Store.SaveTasks(tasks)
+	id := len(Tasks) + 1
+	newTask := models.Task{ID: id, Title: title, Status: models.StatusTodo}
+	Tasks = append(Tasks, newTask)
+	storage.SaveTasks("tasks.json", Tasks)
 	mu.Unlock()
 
-	http.Redirect(w, r, "/", 303)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func MoveHandler(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", 400)
+func MoveTaskHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	id, _ := strconv.Atoi(r.FormValue("id"))
-	status := r.FormValue("status")
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	idStr := r.FormValue("id")
+	statusStr := r.FormValue("status")
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
 
 	mu.Lock()
-	for i := range tasks {
-		if tasks[i].ID == id {
-			tasks[i].Status = models.Status(status)
+	for i := range Tasks {
+		if Tasks[i].ID == id {
+			switch statusStr {
+			case "todo":
+				Tasks[i].Status = models.StatusTodo
+			case "doing":
+				Tasks[i].Status = models.StatusDoing
+			case "done":
+				Tasks[i].Status = models.StatusDone
+			}
+			break
 		}
 	}
-	_ = storage.Store.SaveTasks(tasks)
+	storage.SaveTasks("tasks.json", Tasks)
 	mu.Unlock()
 
-	http.Redirect(w, r, "/", 303)
-}
-
-func DeleteHandler(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "invalid form", 400)
-		return
-	}
-	id, _ := strconv.Atoi(r.FormValue("id"))
-
-	mu.Lock()
-	var newTasks []models.Task
-	for _, t := range tasks {
-		if t.ID != id {
-			newTasks = append(newTasks, t)
-		}
-	}
-	tasks = newTasks
-	_ = storage.Store.SaveTasks(tasks)
-	mu.Unlock()
-
-	http.Redirect(w, r, "/", 303)
-}
-
-func ResetHandler(w http.ResponseWriter, r *http.Request) {
-	mu.Lock()
-	tasks = []models.Task{
-		{ID: next(), Title: "Go installieren", Status: models.StatusTodo},
-		{ID: next(), Title: "Kanban Board bauen", Status: models.StatusDoing},
-		{ID: next(), Title: "Kaffee holen", Status: models.StatusDone},
-	}
-	_ = storage.Store.SaveTasks(tasks)
-	mu.Unlock()
-	http.Redirect(w, r, "/", 303)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

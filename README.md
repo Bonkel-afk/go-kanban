@@ -2,7 +2,7 @@
 
 Ein leichtgewichtiges **Kanban-Board** geschrieben in **Go (Golang)** — läuft als schlanker lokaler Webserver, speichert Tasks in einer JSON-Datei und kann optional in einem **Docker-Container** betrieben werden.
 
-![Kanban Screenshot](docs/screenshot.png) <!-- optional: füge später dein eigenes Bild hier ein -->
+![Kanban Screenshot](documents/go-kanban-screenshot.png) <!-- optional: füge später dein eigenes Bild hier ein -->
 
 ---
 

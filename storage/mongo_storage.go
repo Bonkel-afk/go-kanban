@@ -19,6 +19,7 @@ func NewMongoStorage(uri, dbName, collName string) (*MongoStorage, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -51,15 +52,20 @@ func (m *MongoStorage) SaveTasks(tasks []models.Task) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := m.Collection.DeleteMany(ctx, bson.M{})
-	if err != nil {
+	// alles raus, dann vollständig neu schreiben
+	if _, err := m.Collection.DeleteMany(ctx, bson.M{}); err != nil {
 		return err
+	}
+
+	if len(tasks) == 0 {
+		return nil
 	}
 
 	var docs []interface{}
 	for _, t := range tasks {
 		docs = append(docs, t)
 	}
-	_, err = m.Collection.InsertMany(ctx, docs)
+
+	_, err := m.Collection.InsertMany(ctx, docs)
 	return err
 }

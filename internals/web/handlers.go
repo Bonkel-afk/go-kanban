@@ -2,6 +2,7 @@ package web
 
 import (
 	"html/template"
+	"log"
 	"net/http"
 	"strconv"
 	"sync"
@@ -16,8 +17,39 @@ var (
 	tasks []models.Task
 )
 
+// InitTasks wird einmal im main() aufgerufen, nachdem der Storage gebaut wurde.
+func InitTasks(store storage.Storage) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	loaded, err := store.LoadTasks()
+	if err != nil {
+		log.Println("⚠️ Konnte Tasks nicht laden:", err)
+		tasks = []models.Task{}
+	} else {
+		tasks = loaded
+	}
+
+	log.Printf("🔎 InitTasks: %d Tasks geladen\n", len(tasks))
+
+	// Wenn noch keine Tasks da sind, Demo-Daten anlegen
+	if len(tasks) == 0 {
+		log.Println("ℹ️ Keine Tasks gefunden – Demo-Daten werden angelegt")
+		tasks = []models.Task{
+			{ID: 1, Title: "Go installieren", Status: models.StatusTodo},
+			{ID: 2, Title: "Kanban Board bauen", Status: models.StatusDoing},
+			{ID: 3, Title: "Kaffee holen", Status: models.StatusDone},
+		}
+		if err := store.SaveTasks(tasks); err != nil {
+			log.Println("⚠️ Konnte Demo-Tasks nicht speichern:", err)
+		}
+	}
+}
+
 func BoardHandler(w http.ResponseWriter, r *http.Request, store storage.Storage) {
 	mu.Lock()
+	defer mu.Unlock()
+
 	var todo, doing, done []models.Task
 	for _, t := range tasks {
 		switch t.Status {
@@ -29,12 +61,16 @@ func BoardHandler(w http.ResponseWriter, r *http.Request, store storage.Storage)
 			done = append(done, t)
 		}
 	}
+
 	data := struct {
 		Todo  []models.Task
 		Doing []models.Task
 		Done  []models.Task
-	}{todo, doing, done}
-	mu.Unlock()
+	}{
+		Todo:  todo,
+		Doing: doing,
+		Done:  done,
+	}
 
 	if err := tmpl.Execute(w, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -46,12 +82,10 @@ func AddTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Storag
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
-
 	title := r.FormValue("title")
 	if title == "" {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -59,11 +93,27 @@ func AddTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Storag
 	}
 
 	mu.Lock()
-	id := len(tasks) + 1
-	newTask := models.Task{ID: id, Title: title, Status: models.StatusTodo}
+	defer mu.Unlock()
+
+	// neue ID: max(ID)+1
+	maxID := 0
+	for _, t := range tasks {
+		if t.ID > maxID {
+			maxID = t.ID
+		}
+	}
+	newTask := models.Task{
+		ID:     maxID + 1,
+		Title:  title,
+		Status: models.StatusTodo,
+	}
 	tasks = append(tasks, newTask)
-	store.SaveTasks(tasks)
-	mu.Unlock()
+
+	if err := store.SaveTasks(tasks); err != nil {
+		log.Println("Fehler beim Speichern nach Add:", err)
+		http.Error(w, "could not save", http.StatusInternalServerError)
+		return
+	}
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -77,22 +127,33 @@ func MoveTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Stora
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
-	id, err := strconv.Atoi(r.FormValue("id"))
+
+	idStr := r.FormValue("id")
+	statusStr := r.FormValue("status")
+
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	newStatus := models.Status(r.FormValue("status"))
+
+	newStatus := models.Status(statusStr)
 
 	mu.Lock()
+	defer mu.Unlock()
+
 	for i := range tasks {
 		if tasks[i].ID == id {
 			tasks[i].Status = newStatus
 			break
 		}
 	}
-	store.SaveTasks(tasks)
-	mu.Unlock()
+
+	if err := store.SaveTasks(tasks); err != nil {
+		log.Println("Fehler beim Speichern nach Move:", err)
+		http.Error(w, "could not save", http.StatusInternalServerError)
+		return
+	}
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -102,12 +163,10 @@ func DeleteTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Sto
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
-
 	idStr := r.FormValue("id")
 	id, err := strconv.Atoi(idStr)
 	if err != nil {
@@ -116,6 +175,8 @@ func DeleteTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Sto
 	}
 
 	mu.Lock()
+	defer mu.Unlock()
+
 	var newTasks []models.Task
 	for _, t := range tasks {
 		if t.ID != id {
@@ -123,12 +184,12 @@ func DeleteTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Sto
 		}
 	}
 	tasks = newTasks
+
 	if err := store.SaveTasks(tasks); err != nil {
-		mu.Unlock()
+		log.Println("Fehler beim Speichern nach Delete:", err)
 		http.Error(w, "could not save", http.StatusInternalServerError)
 		return
 	}
-	mu.Unlock()
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

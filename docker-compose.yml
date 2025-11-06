@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:6
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  app:
+    build: .
+    ports:
+      - "9090:9090"
+    depends_on:
+      - mongo
+    environment:
+      KANBAN_STORAGE: "mongo"
+      KANBAN_MONGO_URI: "mongodb://mongo:27017"
+
+volumes:
+  mongo_data:

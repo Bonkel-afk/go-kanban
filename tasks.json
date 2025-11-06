@@ -1,17 +1,17 @@
 [
   {
     "id": 1,
-    "title": "Go installieren",
+    "title": "Install Go",
     "status": "todo"
   },
   {
     "id": 2,
-    "title": "Kanban Board bauen",
+    "title": " Build Kanban Board ",
     "status": "doing"
   },
   {
     "id": 3,
-    "title": "Kaffee holen",
+    "title": "Get Coffee",
     "status": "done"
   }
 ]

@@ -1,0 +1,740 @@
+package main
+
+import (
+	"encoding/json"
+	"html/template"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
+	"sync"
+)
+
+type Status string
+
+const (
+	StatusTodo  Status = "todo"
+	StatusDoing Status = "doing"
+	StatusDone  Status = "done"
+)
+
+type Task struct {
+	ID     int    `json:"id"`
+	Title  string `json:"title"`
+	Status Status `json:"status"`
+}
+
+// Speicherdatei
+const dataFile = "tasks.json"
+
+var (
+	tasks  []Task
+	nextID = 1
+	mu     sync.Mutex
+)
+
+type BoardData struct {
+	Todo  []Task
+	Doing []Task
+	Done  []Task
+}
+
+var tmpl = template.Must(template.New("board").Parse(`
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Go Kanban Board</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --bg: #0f172a;
+            --bg-card: #020617;
+            --bg-column: #020617;
+            --accent: #38bdf8;
+            --accent-soft: rgba(56,189,248,0.2);
+            --border-soft: rgba(148,163,184,0.3);
+            --text-main: #e5e7eb;
+            --text-muted: #9ca3af;
+            --danger: #f97373;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top, #1e293b 0, #020617 50%, #020617 100%);
+            color: var(--text-main);
+        }
+
+        header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid rgba(148,163,184,0.3);
+            backdrop-filter: blur(12px);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: rgba(15,23,42,0.9);
+        }
+
+        header-inner {
+            max-width: 1120px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.25rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .badge {
+            font-size: 0.75rem;
+            padding: 0.15rem 0.45rem;
+            border-radius: 999px;
+            border: 1px solid rgba(148,163,184,0.5);
+            color: var(--text-muted);
+        }
+
+        main {
+            max-width: 1120px;
+            margin: 1.5rem auto;
+            padding: 0 1.5rem 2rem;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: 1rem;
+            padding: 1rem 1.5rem 1.5rem;
+            border: 1px solid rgba(148,163,184,0.35);
+            box-shadow:
+                0 18px 40px rgba(15,23,42,0.8),
+                0 0 0 1px rgba(15,23,42,0.9);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .card-header-title {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .card-header-subtitle {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .add-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1.25rem;
+            padding: 0.75rem;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(148,163,184,0.35);
+            background: rgba(15,23,42,0.7);
+        }
+
+        .add-form input[type="text"] {
+            flex: 1;
+            min-width: 180px;
+            padding: 0.6rem 0.75rem;
+            border-radius: 0.6rem;
+            border: 1px solid rgba(148,163,184,0.6);
+            background: #020617;
+            color: var(--text-main);
+            font-size: 0.95rem;
+        }
+
+        .add-form input[type="text"]::placeholder {
+            color: #4b5563;
+        }
+
+        .btn {
+            border: none;
+            border-radius: 999px;
+            padding: 0.55rem 0.95rem;
+            font-size: 0.85rem;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-weight: 500;
+            letter-spacing: 0.02em;
+        }
+
+        .btn-primary {
+            background: radial-gradient(circle at top left, #38bdf8, #0ea5e9);
+            color: #0b1120;
+        }
+
+        .btn-primary:hover {
+            filter: brightness(1.05);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            border: 1px solid rgba(148,163,184,0.5);
+            color: var(--text-muted);
+        }
+
+        .btn-ghost:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .columns {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 1rem;
+        }
+
+        @media (max-width: 900px) {
+            .columns {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 640px) {
+            header-inner {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .columns {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
+        .column {
+            background: var(--bg-column);
+            border-radius: 0.85rem;
+            padding: 0.75rem;
+            border: 1px solid rgba(148,163,184,0.35);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .column::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top, var(--accent-soft), transparent 60%);
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+        .column-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .column-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.09em;
+            color: var(--text-muted);
+        }
+
+        .pill-count {
+            font-size: 0.75rem;
+            padding: 0.15rem 0.6rem;
+            border-radius: 999px;
+            border: 1px solid rgba(148,163,184,0.7);
+            color: var(--text-muted);
+        }
+
+        .tasks {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            position: relative;
+            z-index: 1;
+        }
+
+        .task {
+            border-radius: 0.75rem;
+            padding: 0.6rem 0.65rem 0.55rem;
+            background: rgba(15,23,42,0.95);
+            border: 1px solid var(--border-soft);
+            box-shadow:
+                0 12px 24px rgba(15,23,42,0.9),
+                0 0 0 1px rgba(15,23,42,0.9);
+        }
+
+        .task-title {
+            margin: 0 0 0.45rem 0;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .task-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .task-id {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        .task-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+            justify-content: flex-end;
+        }
+
+        .btn-small {
+            padding: 0.25rem 0.55rem;
+            font-size: 0.75rem;
+            border-radius: 999px;
+        }
+
+        .btn-soft {
+            background: rgba(15,23,42,0.9);
+            border: 1px solid rgba(148,163,184,0.7);
+            color: var(--text-muted);
+        }
+
+        .btn-soft:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-danger {
+            background: rgba(248,113,113,0.1);
+            border: 1px solid rgba(248,113,113,0.7);
+            color: #fecaca;
+        }
+
+        .btn-danger:hover {
+            background: rgba(248,113,113,0.18);
+        }
+
+        a.reset-link {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        a.reset-link:hover {
+            color: var(--danger);
+        }
+
+    </style>
+</head>
+<body>
+<header>
+    <header-inner>
+        <div>
+            <h1>Go Kanban</h1>
+            <div class="card-header-subtitle">Leichtgewichtiger Task-Planer in Go</div>
+        </div>
+        <div class="badge">Local · In-Memory + JSON</div>
+    </header-inner>
+</header>
+
+<main>
+    <section class="card">
+        <div class="card-header">
+            <div>
+                <div class="card-header-title">Board</div>
+                <div class="card-header-subtitle">
+                    Erstelle Tasks, verschiebe sie durch den Flow und speichere sie lokal.
+                </div>
+            </div>
+            <div>
+                <a class="reset-link" href="/reset">Demo-Daten zurücksetzen</a>
+            </div>
+        </div>
+
+        <form class="add-form" method="POST" action="/add">
+            <input type="text" name="title" placeholder="Neue Aufgabe eingeben und Enter drücken …" required>
+            <button type="submit" class="btn btn-primary">
+                + Task
+            </button>
+        </form>
+
+        <div class="columns">
+            <div class="column">
+                <div class="column-header">
+                    <div class="column-title">Todo</div>
+                    <div class="pill-count">{{len .Todo}}</div>
+                </div>
+                <div class="tasks">
+                    {{range .Todo}}
+                    <div class="task">
+                        <p class="task-title">{{.Title}}</p>
+                        <div class="task-meta">
+                            <span class="task-id">#{{.ID}}</span>
+                            <div class="task-actions">
+                                <form method="POST" action="/move">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <input type="hidden" name="status" value="doing">
+                                    <button type="submit" class="btn btn-small btn-soft">→ Doing</button>
+                                </form>
+                                <form method="POST" action="/move">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <input type="hidden" name="status" value="done">
+                                    <button type="submit" class="btn btn-small btn-soft">→ Done</button>
+                                </form>
+                                <form method="POST" action="/delete">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <button type="submit" class="btn btn-small btn-danger">Löschen</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="column">
+                <div class="column-header">
+                    <div class="column-title">Doing</div>
+                    <div class="pill-count">{{len .Doing}}</div>
+                </div>
+                <div class="tasks">
+                    {{range .Doing}}
+                    <div class="task">
+                        <p class="task-title">{{.Title}}</p>
+                        <div class="task-meta">
+                            <span class="task-id">#{{.ID}}</span>
+                            <div class="task-actions">
+                                <form method="POST" action="/move">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <input type="hidden" name="status" value="todo">
+                                    <button type="submit" class="btn btn-small btn-soft">← Todo</button>
+                                </form>
+                                <form method="POST" action="/move">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <input type="hidden" name="status" value="done">
+                                    <button type="submit" class="btn btn-small btn-soft">→ Done</button>
+                                </form>
+                                <form method="POST" action="/delete">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <button type="submit" class="btn btn-small btn-danger">Löschen</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <div class="column">
+                <div class="column-header">
+                    <div class="column-title">Done</div>
+                    <div class="pill-count">{{len .Done}}</div>
+                </div>
+                <div class="tasks">
+                    {{range .Done}}
+                    <div class="task">
+                        <p class="task-title">{{.Title}}</p>
+                        <div class="task-meta">
+                            <span class="task-id">#{{.ID}}</span>
+                            <div class="task-actions">
+                                <form method="POST" action="/move">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <input type="hidden" name="status" value="todo">
+                                    <button type="submit" class="btn btn-small btn-soft">← Todo</button>
+                                </form>
+                                <form method="POST" action="/move">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <input type="hidden" name="status" value="doing">
+                                    <button type="submit" class="btn btn-small btn-soft">← Doing</button>
+                                </form>
+                                <form method="POST" action="/delete">
+                                    <input type="hidden" name="id" value="{{.ID}}">
+                                    <button type="submit" class="btn btn-small btn-danger">Löschen</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+    </section>
+</main>
+</body>
+</html>
+`))
+
+func main() {
+	mu.Lock()
+	if err := loadTasks(); err != nil {
+		log.Println("Konnte tasks nicht laden:", err)
+	}
+
+	// Wenn noch nix gespeichert ist, Demo-Daten anlegen
+	if len(tasks) == 0 {
+		tasks = append(tasks,
+			Task{ID: next(), Title: "Go installieren", Status: StatusTodo},
+			Task{ID: next(), Title: "Kanban Board bauen", Status: StatusDoing},
+			Task{ID: next(), Title: "Kaffee holen", Status: StatusDone},
+		)
+		if err := saveTasks(); err != nil {
+			log.Println("Konnte Demo-tasks nicht speichern:", err)
+		}
+	}
+	mu.Unlock()
+
+	http.HandleFunc("/", boardHandler)
+	http.HandleFunc("/add", addHandler)
+	http.HandleFunc("/move", moveHandler)
+	http.HandleFunc("/delete", deleteHandler)
+	http.HandleFunc("/reset", resetHandler)
+
+	log.Println("Server läuft auf http://localhost:9090")
+	log.Fatal(http.ListenAndServe(":9090", nil))
+}
+
+func next() int {
+	id := nextID
+	nextID++
+	return id
+}
+
+// lädt tasks aus tasks.json (ruft man nur mit gehaltenem mu auf)
+func loadTasks() error {
+	f, err := os.Open(dataFile)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var loaded []Task
+	if err := json.NewDecoder(f).Decode(&loaded); err != nil {
+		return err
+	}
+
+	tasks = loaded
+
+	maxID := 0
+	for _, t := range tasks {
+		if t.ID > maxID {
+			maxID = t.ID
+		}
+	}
+	nextID = maxID + 1
+	if nextID < 1 {
+		nextID = 1
+	}
+
+	return nil
+}
+
+// speichert tasks in tasks.json (ruft man nur mit gehaltenem mu auf)
+func saveTasks() error {
+	tmp := dataFile + ".tmp"
+
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(tasks); err != nil {
+		_ = f.Close()
+		return err
+	}
+
+	if err := f.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, dataFile)
+}
+
+func boardHandler(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	var todo, doing, done []Task
+	for _, t := range tasks {
+		switch t.Status {
+		case StatusTodo:
+			todo = append(todo, t)
+		case StatusDoing:
+			doing = append(doing, t)
+		case StatusDone:
+			done = append(done, t)
+		}
+	}
+	data := BoardData{
+		Todo:  todo,
+		Doing: doing,
+		Done:  done,
+	}
+	mu.Unlock()
+
+	if err := tmpl.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func addHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	title := r.FormValue("title")
+	if title == "" {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	mu.Lock()
+	tasks = append(tasks, Task{
+		ID:     next(),
+		Title:  title,
+		Status: StatusTodo,
+	})
+	if err := saveTasks(); err != nil {
+		mu.Unlock()
+		log.Println("Fehler beim Speichern:", err)
+		http.Error(w, "could not save", http.StatusInternalServerError)
+		return
+	}
+	mu.Unlock()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func moveHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	idStr := r.FormValue("id")
+	statusStr := r.FormValue("status")
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	var newStatus Status
+	switch statusStr {
+	case "todo":
+		newStatus = StatusTodo
+	case "doing":
+		newStatus = StatusDoing
+	case "done":
+		newStatus = StatusDone
+	default:
+		http.Error(w, "invalid status", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	for i := range tasks {
+		if tasks[i].ID == id {
+			tasks[i].Status = newStatus
+			break
+		}
+	}
+	if err := saveTasks(); err != nil {
+		mu.Unlock()
+		log.Println("Fehler beim Speichern:", err)
+		http.Error(w, "could not save", http.StatusInternalServerError)
+		return
+	}
+	mu.Unlock()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func deleteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	idStr := r.FormValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	var newTasks []Task
+	for _, t := range tasks {
+		if t.ID != id {
+			newTasks = append(newTasks, t)
+		}
+	}
+	tasks = newTasks
+
+	if err := saveTasks(); err != nil {
+		mu.Unlock()
+		log.Println("Fehler beim Speichern:", err)
+		http.Error(w, "could not save", http.StatusInternalServerError)
+		return
+	}
+	mu.Unlock()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func resetHandler(w http.ResponseWriter, r *http.Request) {
+	mu.Lock()
+	tasks = nil
+	nextID = 1
+	tasks = append(tasks,
+		Task{ID: next(), Title: "Go installieren", Status: StatusTodo},
+		Task{ID: next(), Title: "Kanban Board bauen", Status: StatusDoing},
+		Task{ID: next(), Title: "Kaffee holen", Status: StatusDone},
+	)
+	if err := saveTasks(); err != nil {
+		mu.Unlock()
+		log.Println("Fehler beim Speichern:", err)
+		http.Error(w, "could not save", http.StatusInternalServerError)
+		return
+	}
+	mu.Unlock()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}

@@ -1,32 +1,34 @@
-# 1. Build-Stage
-FROM golang:1.22-alpine AS builder
+# ---------- Build Stage ----------
+FROM golang:1.23-alpine AS builder
 
-# Arbeitsverzeichnis im Container
 WORKDIR /app
 
-# Go-Module vorbereiten
+# Go Modules
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Restlichen Code kopieren
+# Source Code
 COPY . .
 
-# Statisches Linux-Binary bauen
-ENV CGO_ENABLED=0 GOOS=linux
+# Build Binary
 RUN go build -o kanban ./server
 
-# 2. Runtime-Stage (kleines Image ohne Go-Toolchain)
+# ---------- Runtime Stage ----------
 FROM alpine:3.20
 
 WORKDIR /app
 
-# Binary aus dem Builder-Stage kopieren
-COPY --from=builder /app/kanban ./kanban
+# Binary kopieren
+COPY --from=builder /app/kanban /app/kanban
 
-# Standard-Port deines Servers
+# Templates & Static-Files mit ins Image
+COPY --from=builder /app/internals/web/templates /app/internals/web/templates
+COPY --from=builder /app/internals/web/static /app/internals/web/static
+
+# Expose Port
 EXPOSE 9090
 
-# Default: File-Storage (Mongo steuerst du über docker-compose-ENV)
+# Default Environment (kann in docker-compose überschrieben werden)
 ENV KANBAN_STORAGE=file
 
-CMD ["./kanban"]
+CMD ["/app/kanban"]

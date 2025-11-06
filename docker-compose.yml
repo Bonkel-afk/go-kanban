@@ -3,20 +3,26 @@ version: "3.9"
 services:
   mongo:
     image: mongo:6
+    container_name: kanban-mongo-local
+    restart: always
     ports:
       - "27018:27017"
     volumes:
-      - mongo_data:/data/db
+      - mongo_local_data:/data/db
 
   app:
-    build: .
-    ports:
-      - "9090:9090"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kanban-local
+    restart: always
     depends_on:
       - mongo
     environment:
       KANBAN_STORAGE: "mongo"
       KANBAN_MONGO_URI: "mongodb://mongo:27017"
+    ports:
+      - "9090:9090"
 
 volumes:
-  mongo_data:
+  mongo_local_data:

@@ -30,6 +30,9 @@ func SetupRouter(store storage.Storage) *http.ServeMux {
 			http.FileServer(http.Dir("internals/web/static")),
 		),
 	)
+	mux.HandleFunc("/delete", func(w http.ResponseWriter, r *http.Request) {
+		DeleteTaskHandler(w, r, store)
+	})
 
 	return mux
 }

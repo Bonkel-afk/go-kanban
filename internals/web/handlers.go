@@ -96,3 +96,39 @@ func MoveTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Stora
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
+
+func DeleteTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Storage) {
+	if r.Method != http.MethodPost {
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "invalid form", http.StatusBadRequest)
+		return
+	}
+
+	idStr := r.FormValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+
+	mu.Lock()
+	var newTasks []models.Task
+	for _, t := range tasks {
+		if t.ID != id {
+			newTasks = append(newTasks, t)
+		}
+	}
+	tasks = newTasks
+	if err := store.SaveTasks(tasks); err != nil {
+		mu.Unlock()
+		http.Error(w, "could not save", http.StatusInternalServerError)
+		return
+	}
+	mu.Unlock()
+
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}

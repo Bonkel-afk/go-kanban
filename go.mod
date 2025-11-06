@@ -1,4 +1,4 @@
-module github.com/Bonkel-afk/go-kanban
+module com.bonkelbansi/go-kanban
 
 go 1.22.2
 

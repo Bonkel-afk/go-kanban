@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"os"
 
-	"go-kanban/internal/models"
+	"com.bonkelbansi/go-kanban/internals/models"
 )
 
 type FileStore struct {

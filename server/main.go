@@ -4,8 +4,8 @@ import (
 	"log"
 	"net/http"
 
-	"go-kanban/internals/web"
-	"internals/storage"
+	"com.bonkelbansi/go-kanban/internals/web"
+	"com.bonkelbansi/go-kanban/storage"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"go-kanban/internal/models"
+	"com.bonkelbansi/go-kanban/internals/models"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"

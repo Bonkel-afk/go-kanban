@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"sync"
 
-	"go-kanban/internal/models"
-	"go-kanban/internal/storage"
+	"com.bonkelbansi/go-kanban/internals/models"
+	"com.bonkelbansi/go-kanban/storage"
 )
 
 type BoardData struct {

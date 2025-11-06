@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"go-kanban/internal/models"
+	"com.bonkelbansi/go-kanban/internals/models"
 )
 
 type Storage interface {

@@ -9,6 +9,6 @@ func SetupRouter() *http.ServeMux {
 	mux.HandleFunc("/", BoardHandler)
 	mux.HandleFunc("/add", AddTaskHandler)
 	mux.HandleFunc("/move", MoveTaskHandler)
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internal/web/static"))))
 	return mux
 }

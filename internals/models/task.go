@@ -9,7 +9,7 @@ const (
 )
 
 type Task struct {
-	ID     int    `json:"id"`
-	Title  string `json:"title"`
-	Status Status `json:"status"`
+	ID     int    `json:"id" bson:"id"`
+	Title  string `json:"title" bson:"title"`
+	Status Status `json:"status" bson:"status"`
 }

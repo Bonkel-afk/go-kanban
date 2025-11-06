@@ -7,29 +7,44 @@ import (
 	"com.bonkelbansi/go-kanban/internals/models"
 )
 
-func LoadTasks(filename string) ([]models.Task, error) {
-	f, err := os.Open(filename)
+type FileStore struct {
+	Path string
+}
+
+func (f *FileStore) LoadTasks() ([]models.Task, error) {
+	_, err := os.Stat(f.Path)
 	if os.IsNotExist(err) {
 		return []models.Task{}, nil
 	}
+	file, err := os.Open(f.Path)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer file.Close()
 
 	var tasks []models.Task
-	err = json.NewDecoder(f).Decode(&tasks)
-	return tasks, err
+	if err := json.NewDecoder(file).Decode(&tasks); err != nil {
+		return nil, err
+	}
+	return tasks, nil
 }
 
-func SaveTasks(filename string, tasks []models.Task) error {
-	f, err := os.Create(filename)
+func (f *FileStore) SaveTasks(ts []models.Task) error {
+	tmp := f.Path + ".tmp"
+	file, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer file.Close()
 
-	enc := json.NewEncoder(f)
+	enc := json.NewEncoder(file)
 	enc.SetIndent("", "  ")
-	return enc.Encode(tasks)
+	if err := enc.Encode(ts); err != nil {
+		return err
+	}
+	return os.Rename(tmp, f.Path)
+}
+
+func (f *FileStore) ResetDemo(demo []models.Task) error {
+	return f.SaveTasks(demo)
 }

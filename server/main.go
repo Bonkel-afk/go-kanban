@@ -3,29 +3,30 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
 
 	"com.bonkelbansi/go-kanban/internals/web"
 	"com.bonkelbansi/go-kanban/storage"
 )
 
 func main() {
-	mStore, err := storage.InitStore()
-	if err != nil {
-		log.Fatal("Storage init fehlgeschlagen:", err)
+	var store storage.Storage
+
+	mode := os.Getenv("KANBAN_STORAGE")
+	if mode == "mongo" {
+		mongoURI := os.Getenv("KANBAN_MONGO_URI")
+		ms, err := storage.NewMongoStorage(mongoURI, "kanban", "tasks")
+		if err != nil {
+			log.Fatalf("MongoDB-Verbindung fehlgeschlagen: %v", err)
+		}
+		store = ms
+		log.Println("📦 MongoDB aktiv")
+	} else {
+		store = &storage.FileStorage{FilePath: "tasks.json"}
+		log.Println("💾 Lokale JSON-Datei aktiv")
 	}
-	if mStore != nil {
-		defer mStore.Close()
-	}
 
-	web.Load()
-
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("internals/web/static"))))
-	http.HandleFunc("/", web.BoardHandler)
-	http.HandleFunc("/add", web.AddHandler)
-	http.HandleFunc("/move", web.MoveHandler)
-	http.HandleFunc("/delete", web.DeleteHandler)
-	http.HandleFunc("/reset", web.ResetHandler)
-
+	mux := web.SetupRouter(store)
 	log.Println("Server läuft auf http://localhost:9090")
-	log.Fatal(http.ListenAndServe(":9090", nil))
+	log.Fatal(http.ListenAndServe(":9090", mux))
 }

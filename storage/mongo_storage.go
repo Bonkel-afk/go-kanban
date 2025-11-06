@@ -5,77 +5,61 @@ import (
 	"time"
 
 	"com.bonkelbansi/go-kanban/internals/models"
-
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type MongoStore struct {
-	client *mongo.Client
-	coll   *mongo.Collection
+type MongoStorage struct {
+	Collection *mongo.Collection
 }
 
-func NewMongoStore(uri string) (*MongoStore, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+func NewMongoStorage(uri, dbName, collName string) (*MongoStorage, error) {
+	client, err := mongo.NewClient(options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	if err := client.Ping(ctx, nil); err != nil {
+	if err := client.Connect(ctx); err != nil {
 		return nil, err
 	}
 
-	db := client.Database("kanban")
-	coll := db.Collection("tasks")
-
-	return &MongoStore{client: client, coll: coll}, nil
+	coll := client.Database(dbName).Collection(collName)
+	return &MongoStorage{Collection: coll}, nil
 }
 
-func (m *MongoStore) LoadTasks() ([]models.Task, error) {
+func (m *MongoStorage) LoadTasks() ([]models.Task, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cur, err := m.coll.Find(ctx, bson.M{})
+	cur, err := m.Collection.Find(ctx, bson.M{})
 	if err != nil {
 		return nil, err
 	}
 	defer cur.Close(ctx)
 
-	var ts []models.Task
-	if err := cur.All(ctx, &ts); err != nil {
+	var tasks []models.Task
+	if err := cur.All(ctx, &tasks); err != nil {
 		return nil, err
 	}
-	return ts, nil
+	return tasks, nil
 }
 
-func (m *MongoStore) SaveTasks(ts []models.Task) error {
+func (m *MongoStorage) SaveTasks(tasks []models.Task) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if _, err := m.coll.DeleteMany(ctx, bson.M{}); err != nil {
+	_, err := m.Collection.DeleteMany(ctx, bson.M{})
+	if err != nil {
 		return err
 	}
-	if len(ts) == 0 {
-		return nil
+
+	var docs []interface{}
+	for _, t := range tasks {
+		docs = append(docs, t)
 	}
-	docs := make([]interface{}, len(ts))
-	for i, t := range ts {
-		docs[i] = t
-	}
-	_, err := m.coll.InsertMany(ctx, docs)
+	_, err = m.Collection.InsertMany(ctx, docs)
 	return err
-}
-
-func (m *MongoStore) ResetDemo(demo []models.Task) error {
-	return m.SaveTasks(demo)
-}
-
-func (m *MongoStore) Close() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = m.client.Disconnect(ctx)
 }

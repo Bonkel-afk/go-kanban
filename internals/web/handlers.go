@@ -12,14 +12,14 @@ import (
 
 var (
 	mu    sync.Mutex
-	Tasks []models.Task
-	Tmpl  = template.Must(template.ParseFiles("internals/web/templates/board.html"))
+	tmpl  = template.Must(template.ParseFiles("internals/web/templates/board.html"))
+	tasks []models.Task
 )
 
-func BoardHandler(w http.ResponseWriter, r *http.Request) {
+func BoardHandler(w http.ResponseWriter, r *http.Request, store storage.Storage) {
 	mu.Lock()
 	var todo, doing, done []models.Task
-	for _, t := range Tasks {
+	for _, t := range tasks {
 		switch t.Status {
 		case models.StatusTodo:
 			todo = append(todo, t)
@@ -36,12 +36,12 @@ func BoardHandler(w http.ResponseWriter, r *http.Request) {
 	}{todo, doing, done}
 	mu.Unlock()
 
-	if err := Tmpl.Execute(w, data); err != nil {
+	if err := tmpl.Execute(w, data); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func AddTaskHandler(w http.ResponseWriter, r *http.Request) {
+func AddTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Storage) {
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
@@ -59,50 +59,39 @@ func AddTaskHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mu.Lock()
-	id := len(Tasks) + 1
+	id := len(tasks) + 1
 	newTask := models.Task{ID: id, Title: title, Status: models.StatusTodo}
-	Tasks = append(Tasks, newTask)
-	storage.SaveTasks("tasks.json", Tasks)
+	tasks = append(tasks, newTask)
+	store.SaveTasks(tasks)
 	mu.Unlock()
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func MoveTaskHandler(w http.ResponseWriter, r *http.Request) {
+func MoveTaskHandler(w http.ResponseWriter, r *http.Request, store storage.Storage) {
 	if r.Method != http.MethodPost {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
-
-	idStr := r.FormValue("id")
-	statusStr := r.FormValue("status")
-
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.Atoi(r.FormValue("id"))
 	if err != nil {
 		http.Error(w, "invalid id", http.StatusBadRequest)
 		return
 	}
+	newStatus := models.Status(r.FormValue("status"))
 
 	mu.Lock()
-	for i := range Tasks {
-		if Tasks[i].ID == id {
-			switch statusStr {
-			case "todo":
-				Tasks[i].Status = models.StatusTodo
-			case "doing":
-				Tasks[i].Status = models.StatusDoing
-			case "done":
-				Tasks[i].Status = models.StatusDone
-			}
+	for i := range tasks {
+		if tasks[i].ID == id {
+			tasks[i].Status = newStatus
 			break
 		}
 	}
-	storage.SaveTasks("tasks.json", Tasks)
+	store.SaveTasks(tasks)
 	mu.Unlock()
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)

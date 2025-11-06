@@ -7,44 +7,41 @@ import (
 	"com.bonkelbansi/go-kanban/internals/models"
 )
 
-type FileStore struct {
-	Path string
+type FileStorage struct {
+	FilePath string
 }
 
-func (f *FileStore) LoadTasks() ([]models.Task, error) {
-	_, err := os.Stat(f.Path)
+func (fs *FileStorage) LoadTasks() ([]models.Task, error) {
+	f, err := os.Open(fs.FilePath)
 	if os.IsNotExist(err) {
 		return []models.Task{}, nil
 	}
-	file, err := os.Open(f.Path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer f.Close()
 
 	var tasks []models.Task
-	if err := json.NewDecoder(file).Decode(&tasks); err != nil {
+	if err := json.NewDecoder(f).Decode(&tasks); err != nil {
 		return nil, err
 	}
 	return tasks, nil
 }
 
-func (f *FileStore) SaveTasks(ts []models.Task) error {
-	tmp := f.Path + ".tmp"
-	file, err := os.Create(tmp)
+func (fs *FileStorage) SaveTasks(tasks []models.Task) error {
+	tmp := fs.FilePath + ".tmp"
+	f, err := os.Create(tmp)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
-
-	enc := json.NewEncoder(file)
+	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
-	if err := enc.Encode(ts); err != nil {
+	if err := enc.Encode(tasks); err != nil {
+		_ = f.Close()
 		return err
 	}
-	return os.Rename(tmp, f.Path)
-}
-
-func (f *FileStore) ResetDemo(demo []models.Task) error {
-	return f.SaveTasks(demo)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, fs.FilePath)
 }
